@@ -79,7 +79,7 @@ namespace K4AlwaysWeaponSkins
 
 			if (HandledPlayers.ContainsKey(player))
 			{
-				if (requiredTeam != player.Team)
+				if (requiredTeam != player.Team) // ? This section handles that, when multiple items given at once and the teams are mixed, its gonna process them separately
 				{
 					if (!TeamWeapons.ContainsKey(player))
 						TeamWeapons[player] = [];
@@ -106,7 +106,7 @@ namespace K4AlwaysWeaponSkins
 			HandledPlayers[player] = originalTeam;
 			player.SwitchTeam(requiredTeam);
 
-			Server.RunOnTick(32, () =>
+			Server.RunOnTick(32, () => // ? We give some time for other actions aswell
 			{
 				if (IsValidPlayer(player))
 				{
@@ -115,12 +115,15 @@ namespace K4AlwaysWeaponSkins
 
 					Server.NextWorldUpdate(() =>
 					{
-						foreach (var weapon in TeamWeapons[player])
+						if (TeamWeapons.TryGetValue(player, out List<string>? value))
 						{
-							player.GiveNamedItem(weapon);
-						}
+							foreach (var weapon in value)
+							{
+								player.GiveNamedItem(weapon);
+							}
 
-						TeamWeapons.Remove(player);
+							TeamWeapons.Remove(player);
+						}
 					});
 				}
 				else
