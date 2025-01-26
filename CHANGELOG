@@ -1,0 +1,3 @@
+-- 2025.01.26 - v1.0.1
+
+- fix: When mutliple items was given at once, it didn't apply some skins for the original team

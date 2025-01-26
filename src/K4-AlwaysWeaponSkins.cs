@@ -14,9 +14,10 @@ namespace K4AlwaysWeaponSkins
 		public override string ModuleName => "CS2 Always Weapon Skins";
 		public override string ModuleAuthor => "K4ryuu @ KitsuneLab";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams aswell.";
-		public override string ModuleVersion => "1.0.0";
+		public override string ModuleVersion => "1.0.1";
 
 		public Dictionary<CCSPlayerController, CsTeam> HandledPlayers = [];
+		public Dictionary<CCSPlayerController, List<string>> TeamWeapons = [];
 
 		public static readonly ReadOnlyDictionary<string, CsTeam> TeamSkins = new ReadOnlyDictionary<string, CsTeam>(new Dictionary<string, CsTeam>
 		{
@@ -68,12 +69,30 @@ namespace K4AlwaysWeaponSkins
 			if (string.IsNullOrEmpty(weaponClass) || !weaponClass.StartsWith("weapon_"))
 				return HookResult.Continue;
 
-			var itemServices = hook.GetParam<CCSPlayer_ItemServices>(0);
-			var player = GetPlayerFromItemServices(itemServices);
-			if (player == null || HandledPlayers.ContainsKey(player))
+			if (!TeamSkins.TryGetValue(weaponClass, out CsTeam requiredTeam))
 				return HookResult.Continue;
 
-			if (TeamSkins.TryGetValue(weaponClass, out CsTeam requiredTeam) && player.Team != requiredTeam)
+			var itemServices = hook.GetParam<CCSPlayer_ItemServices>(0);
+			var player = GetPlayerFromItemServices(itemServices);
+			if (player == null)
+				return HookResult.Continue;
+
+			if (HandledPlayers.ContainsKey(player))
+			{
+				if (requiredTeam != player.Team)
+				{
+					if (!TeamWeapons.ContainsKey(player))
+						TeamWeapons[player] = [];
+
+					if (!TeamWeapons[player].Contains(weaponClass))
+						TeamWeapons[player].Add(weaponClass);
+					return HookResult.Handled;
+				}
+
+				return HookResult.Continue;
+			}
+
+			if (player.Team != requiredTeam)
 			{
 				HandleTeamSwitch(player, requiredTeam);
 			}
@@ -87,14 +106,25 @@ namespace K4AlwaysWeaponSkins
 			HandledPlayers[player] = originalTeam;
 			player.SwitchTeam(requiredTeam);
 
-			Server.NextWorldUpdate(() =>
+			Server.RunOnTick(32, () =>
 			{
 				if (IsValidPlayer(player))
 				{
 					player.SwitchTeam(originalTeam);
-				}
+					HandledPlayers.Remove(player);
 
-				HandledPlayers.Remove(player);
+					Server.NextWorldUpdate(() =>
+					{
+						foreach (var weapon in TeamWeapons[player])
+						{
+							player.GiveNamedItem(weapon);
+						}
+
+						TeamWeapons.Remove(player);
+					});
+				}
+				else
+					HandledPlayers.Remove(player);
 			});
 		}
 
