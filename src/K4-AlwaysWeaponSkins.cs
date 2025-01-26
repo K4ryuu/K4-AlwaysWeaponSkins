@@ -87,8 +87,7 @@ namespace K4AlwaysWeaponSkins
 			HandledPlayers[player] = originalTeam;
 			player.SwitchTeam(requiredTeam);
 
-			// ? Leaving some ticks for other actions, but we could change back at next world update aswell.
-			Server.RunOnTick(32, () =>
+			Server.NextWorldUpdate(() =>
 			{
 				if (IsValidPlayer(player))
 				{
