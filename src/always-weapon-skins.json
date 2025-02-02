@@ -1,0 +1,9 @@
+{
+  "GetTeamNumber": {
+    "signatures": {
+      "library": "server",
+      "windows": "48 8B 41 ? 0F B6 80 ? ? ? ? C3 CC CC CC CC 48 8B 41 ? 48 8B 48 ? 8B 41",
+      "linux": "48 8B 47 ? 0F B6 80 ? ? ? ? C3 0F 1F 40 ? 48 8B 47 ? 8B 80"
+    }
+  }
+}

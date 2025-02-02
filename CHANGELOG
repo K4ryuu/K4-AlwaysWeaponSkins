@@ -1,3 +1,7 @@
+-- 2025.02.02 - v1.1.0
+
+- feat: Changed the full method and now using signature hook instead of team changes
+
 -- 2025.01.26 - v1.0.1
 
 - fix: When mutliple items was given at once, it didn't apply some skins for the original team

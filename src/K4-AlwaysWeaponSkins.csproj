@@ -3,7 +3,7 @@
     <DebugSymbols>False</DebugSymbols>
     <DebugType>None</DebugType>
     <GenerateDependencyFile>false</GenerateDependencyFile>
-    <PublishDir>./bin/K4-AlwaysWeaponSkins/</PublishDir>
+    <PublishDir>./bin/K4-AlwaysWeaponSkins/plugins/K4-AlwaysWeaponSkins/</PublishDir>
   </PropertyGroup>
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -18,4 +18,7 @@
       <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+  <Target Name="CopyCustomFilesToPublishDirectory" AfterTargets="Publish">
+    <Copy SourceFiles="$(ProjectDir)always-weapon-skins.json" DestinationFolder="$(PublishDir)../../gamedata" />
+  </Target>
 </Project>
