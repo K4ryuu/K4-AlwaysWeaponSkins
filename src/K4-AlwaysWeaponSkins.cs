@@ -4,6 +4,7 @@ using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
+using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 
 namespace K4AlwaysWeaponSkins
@@ -33,7 +34,7 @@ namespace K4AlwaysWeaponSkins
 				{
 					PreviousRetries[player] = PreviousRetries[player].Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY)).ToDictionary(x => x.Key, x => x.Value);
 				}
-			});
+			}, TimerFlags.REPEAT);
 		}
 
 		private HookResult OverrideHook(DynamicHook h)
