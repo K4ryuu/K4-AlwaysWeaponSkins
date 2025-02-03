@@ -5,6 +5,9 @@ using CounterStrikeSharp.API.Core;
 
 namespace K4AlwaysWeaponSkins;
 
+/// <summary>
+/// <b>WARNING: Could and WILL be incompatible with large types</b>
+/// </summary>
 public class CUtlVector<T> : NativeObject, IReadOnlyList<T> where T : NativeObject
 {
 	public int Count => NativeAPI.GetNetworkVectorSize(base.Handle);
