@@ -74,8 +74,6 @@ namespace K4AlwaysWeaponSkins
 			if (player == null || !player.IsValid || player.IsBot)
 				return HookResult.Continue;
 
-			Server.PrintToChatAll($"Detected {weapon} giving for {player.PlayerName}");
-
 			if (!PlayerSkins.TryGetValue(player, out Queue<string>? queue))
 			{
 				queue = new Queue<string>();
