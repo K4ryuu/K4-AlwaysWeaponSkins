@@ -73,6 +73,7 @@ To use this server addon, you'll need the following dependencies installed:
 ## Authors
 
 - [**K4ryuu**](https://github.com/K4ryuu) - _Initial work_
+- [**KillStr3ak**](https://github.com/KillStr3aK) - _CUtilVector implementation_
 
 See also the list of [contributors](https://github.com/K4ryuu/K4-AlwaysWeaponSkins/graphs/contributors) who participated in this project as an outside contributor.
 

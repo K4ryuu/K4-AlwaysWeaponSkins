@@ -14,39 +14,26 @@ namespace K4AlwaysWeaponSkins
 		public override string ModuleName => "CS2 Always Weapon Skins";
 		public override string ModuleAuthor => "K4ryuu @ KitsuneLab";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams as well.";
-		public override string ModuleVersion => "1.1.1";
+		public override string ModuleVersion => "1.1.2";
+
+		public const double RETRY_BLOCK_DELAY = 0.1f;
 
 		public MemoryFunctionVoid<int> GetTeamNumber { get; } = new(GameData.GetSignature("GetTeamNumber"));
-		public Dictionary<CCSPlayerController, Queue<string>> PlayerSkins { get; } = [];
-
-		public static readonly ReadOnlyDictionary<string, CsTeam> TeamSkins = new(new Dictionary<string, CsTeam>
-		{
-			// Counter-Terrorists (CT Only)
-			{ "weapon_usp_silencer", CsTeam.CounterTerrorist },  // USP-S
-			{ "weapon_hkp2000", CsTeam.CounterTerrorist },  // P2000
-			{ "weapon_fiveseven", CsTeam.CounterTerrorist },  // Five-SeveN
-			{ "weapon_m4a1_silencer", CsTeam.CounterTerrorist },  // M4A1-S
-			{ "weapon_m4a1", CsTeam.CounterTerrorist },  // M4A4
-			{ "weapon_famas", CsTeam.CounterTerrorist },  // FAMAS
-			{ "weapon_aug", CsTeam.CounterTerrorist },  // AUG
-			{ "weapon_mp9", CsTeam.CounterTerrorist },  // MP9
-			{ "weapon_scar20", CsTeam.CounterTerrorist },  // SCAR-20 (Auto Sniper)
-
-			// Terrorists (T Only)
-			{ "weapon_glock", CsTeam.Terrorist },  // Glock-18
-			{ "weapon_tec9", CsTeam.Terrorist },  // Tec-9
-			{ "weapon_ak47", CsTeam.Terrorist },  // AK-47
-			{ "weapon_galilar", CsTeam.Terrorist },  // Galil AR
-			{ "weapon_sg556", CsTeam.Terrorist },  // SG 553
-			{ "weapon_mac10", CsTeam.Terrorist },  // MAC-10
-			{ "weapon_sawedoff", CsTeam.Terrorist },  // Sawed-Off Shotgun
-			{ "weapon_g3sg1", CsTeam.Terrorist }  // G3SG1 (Auto Sniper)
-		});
+		public Dictionary<CCSPlayerController, Queue<(string weapon, CsTeam team)>> TryTeam { get; } = [];
+		public Dictionary<CCSPlayerController, Dictionary<string, DateTime>> PreviousRetries { get; } = [];
 
 		public override void Load(bool hotReload)
 		{
 			GetTeamNumber.Hook(OverrideHook, HookMode.Pre);
-			VirtualFunctions.GiveNamedItemFunc.Hook(OverrideGiveNamedItem, HookMode.Pre);
+			VirtualFunctions.GiveNamedItemFunc.Hook(OverrideGiveNamedItemPost, HookMode.Post);
+
+			AddTimer(5, () =>
+			{
+				foreach (var player in PreviousRetries.Keys)
+				{
+					PreviousRetries[player] = PreviousRetries[player].Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY)).ToDictionary(x => x.Key, x => x.Value);
+				}
+			});
 		}
 
 		private HookResult OverrideHook(DynamicHook h)
@@ -54,33 +41,67 @@ namespace K4AlwaysWeaponSkins
 			var itemServices = h.GetParam<CCSPlayer_ItemServices>(0);
 			var player = GetPlayerFromItemServices(itemServices);
 
-			if (player != null && player.IsValid && PlayerSkins.TryGetValue(player, out Queue<string>? queue) && queue.TryDequeue(out string? weapon) && TeamSkins.TryGetValue(weapon, out CsTeam team))
-			{
-				h.SetReturn((int)team);
-				return HookResult.Handled;
-			}
+			if (player is null || !player.IsValid)
+				return HookResult.Continue;
 
-			return HookResult.Continue;
+			if (!TryTeam.TryGetValue(player, out var tryTeam))
+				return HookResult.Continue;
+
+			if (!tryTeam.TryDequeue(out var entry))
+				return HookResult.Continue;
+
+			h.SetReturn((int)entry.team);
+			return HookResult.Handled;
 		}
 
-		private HookResult OverrideGiveNamedItem(DynamicHook h)
+		private HookResult OverrideGiveNamedItemPost(DynamicHook h)
 		{
 			string weapon = h.GetParam<string>(1);
 			if (string.IsNullOrEmpty(weapon) || !weapon.Contains("weapon"))
 				return HookResult.Continue;
 
-			var itemServices = h.GetParam<CCSPlayer_ItemServices>(0);
-			var player = GetPlayerFromItemServices(itemServices);
-			if (player == null || !player.IsValid || player.IsBot)
+			CCSPlayerController? player = GetPlayerFromItemServices(h.GetParam<CCSPlayer_ItemServices>(0));
+			CBasePlayerWeapon item = h.GetReturn<CBasePlayerWeapon>();
+			if (player == null || !player.IsValid || !item.IsValid)
 				return HookResult.Continue;
 
-			if (!PlayerSkins.TryGetValue(player, out Queue<string>? queue))
-			{
-				queue = new Queue<string>();
-				PlayerSkins[player] = queue;
-			}
+			CUtlVector<CEconItemAttribute> attributes = item.AttributeManager.Item.NetworkedDynamicAttributes.Attributes.As<CUtlVector<CEconItemAttribute>>();
+			bool skinFound = attributes.Count > 0;
 
-			queue.Enqueue(weapon);
+			if (!skinFound)
+			{
+				if (!PreviousRetries.TryGetValue(player, out var retries))
+				{
+					retries = [];
+					PreviousRetries[player] = retries;
+				}
+				else if (retries.TryGetValue(weapon, out var lastRetry) && DateTime.Now - lastRetry < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY))
+				{
+					// ? No skins found after the first retry, block further retries for a short period.
+					return HookResult.Continue;
+				}
+
+				item.AddEntityIOEvent("Kill", item, null, "", 0f);
+
+				if (!TryTeam.TryGetValue(player, out var tryTeam))
+				{
+					tryTeam = new Queue<(string weapon, CsTeam team)>();
+					TryTeam[player] = tryTeam;
+				}
+
+				if (!retries.ContainsKey(weapon))
+				{
+					retries[weapon] = DateTime.Now;
+				}
+
+				CsTeam nextTeam = player.Team == CsTeam.CounterTerrorist ? CsTeam.Terrorist : CsTeam.CounterTerrorist;
+
+				// ? Running retry with the other team to see the other loadout.
+
+				tryTeam.Enqueue((weapon, nextTeam));
+
+				Server.NextWorldUpdate(() => player.GiveNamedItem(weapon));
+			}
 
 			return HookResult.Continue;
 		}
@@ -88,7 +109,7 @@ namespace K4AlwaysWeaponSkins
 		public override void Unload(bool hotReload)
 		{
 			GetTeamNumber.Unhook(OverrideHook, HookMode.Pre);
-			VirtualFunctions.GiveNamedItemFunc.Unhook(OverrideGiveNamedItem, HookMode.Pre);
+			VirtualFunctions.GiveNamedItemFunc.Unhook(OverrideGiveNamedItemPost, HookMode.Post);
 		}
 
 		public static CCSPlayerController? GetPlayerFromItemServices(CCSPlayer_ItemServices itemServices)
