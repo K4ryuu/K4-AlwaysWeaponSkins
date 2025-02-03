@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Modules.Memory;
@@ -13,33 +14,33 @@ namespace K4AlwaysWeaponSkins
 		public override string ModuleName => "CS2 Always Weapon Skins";
 		public override string ModuleAuthor => "K4ryuu @ KitsuneLab";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams as well.";
-		public override string ModuleVersion => "1.1.0";
+		public override string ModuleVersion => "1.1.1";
 
 		public MemoryFunctionVoid<int> GetTeamNumber { get; } = new(GameData.GetSignature("GetTeamNumber"));
 		public Dictionary<CCSPlayerController, Queue<string>> PlayerSkins { get; } = [];
 
 		public static readonly ReadOnlyDictionary<string, CsTeam> TeamSkins = new(new Dictionary<string, CsTeam>
 		{
-            // Counter-Terrorists (CT)
-            { "weapon_usp_silencer", CsTeam.CounterTerrorist },
-			{ "weapon_m4a1_silencer", CsTeam.CounterTerrorist },
-			{ "weapon_m4a1", CsTeam.CounterTerrorist },
-			{ "weapon_famas", CsTeam.CounterTerrorist },
-			{ "weapon_aug", CsTeam.CounterTerrorist },
-			{ "weapon_mp9", CsTeam.CounterTerrorist },
-			{ "weapon_mp5sd", CsTeam.CounterTerrorist },
-			{ "weapon_hkp2000", CsTeam.CounterTerrorist },
-			{ "weapon_fiveseven", CsTeam.CounterTerrorist },
-			{ "weapon_scar20", CsTeam.CounterTerrorist },
+			// Counter-Terrorists (CT Only)
+			{ "weapon_usp_silencer", CsTeam.CounterTerrorist },  // USP-S
+			{ "weapon_hkp2000", CsTeam.CounterTerrorist },  // P2000
+			{ "weapon_fiveseven", CsTeam.CounterTerrorist },  // Five-SeveN
+			{ "weapon_m4a1_silencer", CsTeam.CounterTerrorist },  // M4A1-S
+			{ "weapon_m4a1", CsTeam.CounterTerrorist },  // M4A4
+			{ "weapon_famas", CsTeam.CounterTerrorist },  // FAMAS
+			{ "weapon_aug", CsTeam.CounterTerrorist },  // AUG
+			{ "weapon_mp9", CsTeam.CounterTerrorist },  // MP9
+			{ "weapon_scar20", CsTeam.CounterTerrorist },  // SCAR-20 (Auto Sniper)
 
-            // Terrorists (T)
-            { "weapon_glock", CsTeam.Terrorist },
-			{ "weapon_tec9", CsTeam.Terrorist },
-			{ "weapon_ak47", CsTeam.Terrorist },
-			{ "weapon_galilar", CsTeam.Terrorist },
-			{ "weapon_sg556", CsTeam.Terrorist },
-			{ "weapon_mac10", CsTeam.Terrorist },
-			{ "weapon_sawedoff", CsTeam.Terrorist }
+			// Terrorists (T Only)
+			{ "weapon_glock", CsTeam.Terrorist },  // Glock-18
+			{ "weapon_tec9", CsTeam.Terrorist },  // Tec-9
+			{ "weapon_ak47", CsTeam.Terrorist },  // AK-47
+			{ "weapon_galilar", CsTeam.Terrorist },  // Galil AR
+			{ "weapon_sg556", CsTeam.Terrorist },  // SG 553
+			{ "weapon_mac10", CsTeam.Terrorist },  // MAC-10
+			{ "weapon_sawedoff", CsTeam.Terrorist },  // Sawed-Off Shotgun
+			{ "weapon_g3sg1", CsTeam.Terrorist }  // G3SG1 (Auto Sniper)
 		});
 
 		public override void Load(bool hotReload)
@@ -72,6 +73,8 @@ namespace K4AlwaysWeaponSkins
 			var player = GetPlayerFromItemServices(itemServices);
 			if (player == null || !player.IsValid || player.IsBot)
 				return HookResult.Continue;
+
+			Server.PrintToChatAll($"Detected {weapon} giving for {player.PlayerName}");
 
 			if (!PlayerSkins.TryGetValue(player, out Queue<string>? queue))
 			{

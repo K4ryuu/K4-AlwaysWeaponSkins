@@ -1,3 +1,7 @@
+-- 2025.02.03 - v1.1.1
+
+- fix: Corrected the weapon list
+
 -- 2025.02.02 - v1.1.0
 
 - feat: Changed the full method and now using signature hook instead of team changes
