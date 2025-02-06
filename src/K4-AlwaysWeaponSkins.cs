@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
@@ -15,13 +14,33 @@ namespace K4AlwaysWeaponSkins
 		public override string ModuleName => "CS2 Always Weapon Skins";
 		public override string ModuleAuthor => "K4ryuu @ KitsuneLab";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams as well.";
-		public override string ModuleVersion => "1.1.2";
+		public override string ModuleVersion => "1.1.3";
 
-		public const double RETRY_BLOCK_DELAY = 0.1f;
+		public const double RETRY_BLOCK_DELAY = 0.5f;
 
 		public MemoryFunctionVoid<int> GetTeamNumber { get; } = new(GameData.GetSignature("GetTeamNumber"));
 		public Dictionary<CCSPlayerController, Queue<(string weapon, CsTeam team)>> TryTeam { get; } = [];
 		public Dictionary<CCSPlayerController, Dictionary<string, DateTime>> PreviousRetries { get; } = [];
+
+		public List<string> IgnoredItems = [
+			"weapon_decoy",
+			"weapon_flashbang",
+			"weapon_smokegrenade",
+			"weapon_hegrenade",
+			"weapon_molotov",
+			"weapon_incgrenade",
+			"weapon_healthshot",
+			"weapon_tagrenade",
+			"weapon_breachcharge",
+			"weapon_diversion",
+			"weapon_firebomb",
+			"weapon_frag",
+			"weapon_snowball",
+			"weapon_tablet",
+			"weapon_bumpmine",
+			"weapon_shield",
+			"weapon_c4"
+		];
 
 		public override void Load(bool hotReload)
 		{
@@ -30,10 +49,7 @@ namespace K4AlwaysWeaponSkins
 
 			AddTimer(5, () =>
 			{
-				foreach (var player in PreviousRetries.Keys)
-				{
-					PreviousRetries[player] = PreviousRetries[player].Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY)).ToDictionary(x => x.Key, x => x.Value);
-				}
+				CleanupOldBlocks();
 			}, TimerFlags.REPEAT);
 		}
 
@@ -58,7 +74,7 @@ namespace K4AlwaysWeaponSkins
 		private HookResult OverrideGiveNamedItemPost(DynamicHook h)
 		{
 			string weapon = h.GetParam<string>(1);
-			if (string.IsNullOrEmpty(weapon) || !weapon.Contains("weapon"))
+			if (string.IsNullOrEmpty(weapon) || !weapon.Contains("weapon") || IgnoredItems.Contains(weapon))
 				return HookResult.Continue;
 
 			CCSPlayerController? player = GetPlayerFromItemServices(h.GetParam<CCSPlayer_ItemServices>(0));
@@ -79,6 +95,7 @@ namespace K4AlwaysWeaponSkins
 				else if (retries.TryGetValue(weapon, out var lastRetry) && DateTime.Now - lastRetry < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY))
 				{
 					// ? No skins found after the first retry, block further retries for a short period.
+					CleanupOldBlocks(player);
 					return HookResult.Continue;
 				}
 
@@ -125,6 +142,31 @@ namespace K4AlwaysWeaponSkins
 			}
 
 			return null;
+		}
+
+		public void CleanupOldBlocks(CCSPlayerController? player = null)
+		{
+			if (player != null)
+			{
+				if (PreviousRetries.TryGetValue(player, out var retries))
+				{
+					PreviousRetries[player] = retries
+					.Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY))
+					.ToDictionary(x => x.Key, x => x.Value);
+				}
+			}
+			else
+			{
+				foreach (var p in PreviousRetries.Keys.ToList())
+				{
+					if (PreviousRetries.TryGetValue(p, out var retries))
+					{
+						PreviousRetries[p] = retries
+							.Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY))
+							.ToDictionary(x => x.Key, x => x.Value);
+					}
+				}
+			}
 		}
 	}
 }

@@ -1,3 +1,9 @@
+-- 2025.02.04 - v1.1.3
+
+- optimise: Added IgnoreList to filter out some items that shouldn't be changed as they have no skins (yet?)
+- fix: Dictionary key not found exception
+- chore(RETRY_BLOCK_DELAY): Increased the remember delay to 1 second
+
 -- 2025.02.03 - v1.1.2
 
 - feat: Reworked logic to find all skins from opposing team when not found in current
