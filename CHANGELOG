@@ -2,7 +2,7 @@
 
 - optimise: Added IgnoreList to filter out some items that shouldn't be changed as they have no skins (yet?)
 - fix: Dictionary key not found exception
-- chore(RETRY_BLOCK_DELAY): Increased the remember delay to 1 second
+- chore(RETRY_BLOCK_DELAY): Increased the remember delay to 0.5 second
 
 -- 2025.02.03 - v1.1.2
 
