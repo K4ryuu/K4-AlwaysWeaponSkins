@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
+using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
 using CounterStrikeSharp.API.Modules.Timers;
@@ -112,10 +113,12 @@ namespace K4AlwaysWeaponSkins
 						if (ccsWeaponBase.AttributeManager.Item.ItemDefinitionIndex != @event.Defindex)
 							continue;
 
-						if (ccsWeaponBase.PrevOwner.Index == player.PlayerPawn.Index)
+						var prevOwner = ccsWeaponBase.PrevOwner.Value?.OriginalController?.Value;
+
+						if (prevOwner == player)
 							continue;
 
-						bool shouldApply = ccsWeaponBase.PrevOwner != null && Config.ApplyOnPreviousOwner || ccsWeaponBase.PrevOwner == null && Config.ApplyOnNoPreviousOwner;
+						bool shouldApply = prevOwner != null && Config.ApplyOnPreviousOwner || prevOwner == null && Config.ApplyOnNoPreviousOwner;
 						if (!shouldApply)
 							continue;
 
