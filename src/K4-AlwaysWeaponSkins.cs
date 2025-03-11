@@ -77,7 +77,7 @@ namespace K4AlwaysWeaponSkins
 
 		private HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
 		{
-			if (!Config.ApplyOnPreviousOwner && Config.ApplyOnNoPreviousOwner)
+			if (!Config.ApplyOnPreviousOwner && !Config.ApplyOnNoPreviousOwner)
 				return HookResult.Continue;
 
 			CCSPlayerController? player = @event.Userid;
