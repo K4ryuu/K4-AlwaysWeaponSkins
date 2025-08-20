@@ -1,16 +1,24 @@
 using System.Collections;
+using System.Runtime.InteropServices;
 using System.Text;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 
 namespace K4AlwaysWeaponSkins;
 
-public class CUtlVector<T> : NativeObject, IReadOnlyList<T> where T : NativeObject
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CUtlVectorRaw
+{
+	public int Size;
+	public nint Memory;
+	public int AllocSize;
+	public int GrowSize;
+}
+
+public class CUtlVector<T>(nint ptr) : NativeObject(ptr), IReadOnlyList<T> where T : NativeObject
 {
 	public int Count => NativeAPI.GetNetworkVectorSize(Handle);
 	public T this[int index] => ElementAt(index);
-
-	public CUtlVector(nint ptr) : base(ptr) { }
 
 	public T ElementAt(int index)
 	{
@@ -31,41 +39,6 @@ public class CUtlVector<T> : NativeObject, IReadOnlyList<T> where T : NativeObje
 
 	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-	public string DebugString()
-	{
-		StringBuilder sb = new StringBuilder();
-		foreach (T element in this)
-		{
-			sb.AppendLine($"Element [{element.Handle}]");
-			var type = typeof(T);
-			foreach (var prop in type.GetProperties())
-			{
-				try
-				{
-					sb.AppendLine($"\t{prop.Name} ({prop.PropertyType.Name}): {prop.GetValue(element)}");
-				}
-				catch (Exception ex)
-				{
-					sb.AppendLine($"\t{prop.Name}: ERROR ({ex.Message})");
-				}
-			}
-
-			foreach (var field in type.GetFields())
-			{
-				try
-				{
-					sb.AppendLine($"\t{field.Name} ({field.FieldType.Name}): {field.GetValue(element)}");
-				}
-				catch (Exception ex)
-				{
-					sb.AppendLine($"\t{field.Name}: ERROR ({ex.Message})");
-				}
-			}
-		}
-
-		return sb.ToString();
-	}
-
 	public TValue? GetValue<TValue>(string name)
 	{
 		foreach (T element in this)
@@ -85,5 +58,49 @@ public class CUtlVector<T> : NativeObject, IReadOnlyList<T> where T : NativeObje
 		}
 
 		throw new KeyNotFoundException($"Property/Field '{name}' not found in any element.");
+	}
+
+	public static unsafe nint CreateVector(int initialSize = 0)
+	{
+		int allocSize = initialSize > 0 ? initialSize : 16;
+		nint vectorPtr = Marshal.AllocHGlobal(Marshal.SizeOf<CUtlVectorRaw>());
+		nint memoryPtr = Marshal.AllocHGlobal(allocSize * IntPtr.Size);
+
+		CUtlVectorRaw* vector = (CUtlVectorRaw*)vectorPtr;
+		vector->Size = 0;
+		vector->Memory = memoryPtr;
+		vector->AllocSize = allocSize;
+		vector->GrowSize = 0;
+
+		return vectorPtr;
+	}
+
+	public static unsafe void FreeVector(nint vectorPtr)
+	{
+		if (vectorPtr == IntPtr.Zero) return;
+
+		CUtlVectorRaw* vector = (CUtlVectorRaw*)vectorPtr;
+		if (vector->Memory != IntPtr.Zero)
+		{
+			Marshal.FreeHGlobal(vector->Memory);
+		}
+		Marshal.FreeHGlobal(vectorPtr);
+	}
+
+	public static unsafe int GetVectorCount(nint vectorPtr)
+	{
+		if (vectorPtr == IntPtr.Zero) return 0;
+		CUtlVectorRaw* vector = (CUtlVectorRaw*)vectorPtr;
+		return vector->Size;
+	}
+
+	public static unsafe nint GetVectorElement(nint vectorPtr, int index)
+	{
+		if (vectorPtr == IntPtr.Zero) return IntPtr.Zero;
+		CUtlVectorRaw* vector = (CUtlVectorRaw*)vectorPtr;
+		if (index < 0 || index >= vector->Size) return IntPtr.Zero;
+
+		nint* elements = (nint*)vector->Memory;
+		return elements[index];
 	}
 }

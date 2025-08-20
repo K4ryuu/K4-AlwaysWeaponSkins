@@ -2,10 +2,8 @@ using System.Text.Json.Serialization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
-using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
-using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
 
@@ -13,319 +11,346 @@ namespace K4AlwaysWeaponSkins
 {
 	public sealed class PluginConfig : BasePluginConfig
 	{
+		[JsonPropertyName("ApplyToMapWeapons")]
+		public bool ApplyToMapWeapons { get; set; } = true;
+
 		[JsonPropertyName("ApplyOnNoPreviousOwner")]
 		public bool ApplyOnNoPreviousOwner { get; set; } = true;
 
 		[JsonPropertyName("ApplyOnPreviousOwner")]
 		public bool ApplyOnPreviousOwner { get; set; } = true;
 
+
 		[JsonPropertyName("ConfigVersion")]
-		public override int Version { get; set; } = 1;
+		public override int Version { get; set; } = 2;
 	}
 
 	[MinimumApiVersion(300)]
 	public class Plugin : BasePlugin, IPluginConfig<PluginConfig>
 	{
 		public override string ModuleName => "CS2 Always Weapon Skins";
-		public override string ModuleAuthor => "K4ryuu @ KitsuneLab";
+		public override string ModuleAuthor => "K4ryuu @ KitsuneLab (Final)";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams as well.";
-		public override string ModuleVersion => "1.1.5";
+		public override string ModuleVersion => "2.0.0";
 
 		public required PluginConfig Config { get; set; } = new PluginConfig();
 		public void OnConfigParsed(PluginConfig config)
 			=> this.Config = config;
 
-		private const double RETRY_BLOCK_DELAY = 1.0f;
-		private const double PICKUP_COOLDOWN = 0.75f;
-		private const int MAX_RETRY_COUNT = 2;
+		private readonly Dictionary<CCSPlayerController, Dictionary<string, Tuple<int, int, int, int>>> SavedWeapons = [];
+		private readonly HashSet<string> PickupLocks = [];
 
-		private MemoryFunctionVoid<int> GetTeamNumber { get; } = new(GameData.GetSignature("GetTeamNumber"));
-		private Dictionary<CCSPlayerController, Queue<(int weapon, CsTeam team)>> TryTeam { get; } = [];
-		private Dictionary<CCSPlayerController, Dictionary<string, DateTime>> PreviousRetries { get; } = [];
-		private Dictionary<CCSPlayerController, Dictionary<string, Tuple<int, int, int, int>>> SavedWeapons = [];
-		private Dictionary<CCSPlayerController, Dictionary<string, DateTime>> PickupCooldowns = [];
-		private Dictionary<CCSPlayerController, Dictionary<string, int>> RetryCounter { get; } = [];
-		private Dictionary<CCSPlayerController, Dictionary<uint, DateTime>> RecentlyGivenWeapons { get; } = [];
-
-		private readonly List<string> IgnoredItems = [
-			"weapon_decoy",
-			"weapon_flashbang",
-			"weapon_smokegrenade",
-			"weapon_hegrenade",
-			"weapon_molotov",
-			"weapon_incgrenade",
-			"weapon_healthshot",
-			"weapon_tagrenade",
-			"weapon_breachcharge",
-			"weapon_diversion",
-			"weapon_firebomb",
-			"weapon_frag",
-			"weapon_snowball",
-			"weapon_tablet",
-			"weapon_bumpmine",
-			"weapon_shield",
-			"weapon_c4"
-		];
+		private MemoryFunctionVoid<IntPtr, string, int, bool, IntPtr>? FindMatchingWeaponsForTeamLoadout = null;
 
 		public override void Load(bool hotReload)
 		{
-			GetTeamNumber.Hook(OverrideHook, HookMode.Pre);
-			VirtualFunctions.GiveNamedItemFunc.Hook(OverrideGiveNamedItemPost, HookMode.Post);
+			try
+			{
+				FindMatchingWeaponsForTeamLoadout = new MemoryFunctionVoid<IntPtr, string, int, bool, IntPtr>(GameData.GetSignature("CCSPlayer_FindMatchingWeaponsForTeamLoadout"));
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Failed to initialize FindMatchingWeaponsForTeamLoadout: {ex.Message}");
+			}
 
-			AddTimer(5, CleanupOldBlocks, TimerFlags.REPEAT);
+			VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPre, HookMode.Pre);
+			VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPost, HookMode.Post);
 
 			RegisterEventHandler<EventItemPickup>(OnItemPickup);
+
+			Logger.LogInformation("Plugin loaded successfully.");
+		}
+
+		private HookResult OnGiveNamedItemPre(DynamicHook hook)
+		{
+			try
+			{
+				CCSPlayerController? player = GetPlayerFromItemServices(hook.GetParam<CCSPlayer_ItemServices>(0));
+				if (player == null || !player.IsValid)
+					return HookResult.Continue;
+
+				string classname = hook.GetParam<string>(1);
+				if (string.IsNullOrEmpty(classname) || !classname.StartsWith("weapon_"))
+					return HookResult.Continue;
+
+				if (IsWeaponKnife(classname))
+					return HookResult.Continue;
+
+				CsTeam playerTeam = player.Team;
+				CsTeam oppositeTeam = (playerTeam == CsTeam.Terrorist) ? CsTeam.CounterTerrorist : CsTeam.Terrorist;
+
+				bool hasSkinInCurrentTeam = HasPlayerSkinForWeapon(player, classname, playerTeam);
+
+				if (hasSkinInCurrentTeam)
+					return HookResult.Continue;
+
+				bool hasSkinInOppositeTeam = HasPlayerSkinForWeapon(player, classname, oppositeTeam);
+
+				if (!hasSkinInOppositeTeam)
+					return HookResult.Continue;
+
+				SetPlayerTeam(player, oppositeTeam);
+
+				Server.NextFrame(() =>
+				{
+					if (player != null && player.IsValid)
+						SetPlayerTeam(player, playerTeam);
+				});
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Error in OnGiveNamedItemPre: {ex.Message}");
+			}
+
+			return HookResult.Continue;
+		}
+
+		private HookResult OnGiveNamedItemPost(DynamicHook hook)
+		{
+			try
+			{
+				CCSPlayerController? player = GetPlayerFromItemServices(hook.GetParam<CCSPlayer_ItemServices>(0));
+				if (player == null || !player.IsValid)
+					return HookResult.Continue;
+
+				string classname = hook.GetParam<string>(1);
+				if (string.IsNullOrEmpty(classname) || !classname.StartsWith("weapon_"))
+					return HookResult.Continue;
+
+				string lockKey = $"{player.SteamID}_{classname}";
+				PickupLocks.Remove(lockKey);
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Error in OnGiveNamedItemPost: {ex.Message}");
+			}
+
+			return HookResult.Continue;
 		}
 
 		private HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
 		{
-			if (!Config.ApplyOnPreviousOwner && !Config.ApplyOnNoPreviousOwner)
-				return HookResult.Continue;
-
-			CCSPlayerController? player = @event.Userid;
-			if (player == null || !player.IsValid || player.PlayerPawn.Value?.WeaponServices == null)
-				return HookResult.Continue;
-
-			if (IgnoredItems.Any(x => x.Contains(@event.Item)))
-				return HookResult.Continue;
-
-			var cooldowns = GetOrCreateDictionary(PickupCooldowns, player);
-
-			if (cooldowns.TryGetValue(@event.Item, out var lastPickup) && DateTime.Now - lastPickup < TimeSpan.FromSeconds(PICKUP_COOLDOWN))
-				return HookResult.Continue;
-
-			cooldowns[@event.Item] = DateTime.Now;
-
-			var previousRetries = GetOrCreateDictionary(PreviousRetries, player);
-			if (previousRetries.TryGetValue(@event.Item, out var lastRetry) && DateTime.Now - lastRetry < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY * 2))
-				return HookResult.Continue;
-
-			List<CHandle<CBasePlayerWeapon>> weaponList = [.. player.PlayerPawn.Value.WeaponServices.MyWeapons];
-
-			foreach (CHandle<CBasePlayerWeapon> weapon in weaponList)
+			try
 			{
-				if (!weapon.IsValid || weapon.Value == null)
-					continue;
+				if (!Config.ApplyToMapWeapons)
+					return HookResult.Continue;
 
-				CCSWeaponBase ccsWeaponBase = weapon.Value.As<CCSWeaponBase>();
+				CCSPlayerController? player = @event.Userid;
+				if (player == null || !player.IsValid || player.PlayerPawn.Value?.WeaponServices == null)
+					return HookResult.Continue;
 
-				if (ccsWeaponBase == null || !ccsWeaponBase.IsValid || ccsWeaponBase.AttributeManager.Item.ItemDefinitionIndex != @event.Defindex)
-					continue;
+				if (string.IsNullOrEmpty(@event.Item))
+					return HookResult.Continue;
 
-				var prevOwner = ccsWeaponBase.PrevOwner.Value?.OriginalController?.Value;
+				string lockKey = $"{player.SteamID}_{@event.Item}";
+				if (PickupLocks.Contains(lockKey))
+					return HookResult.Continue;
 
-				if (prevOwner == player)
-					continue;
+				PickupLocks.Add(lockKey);
 
-				bool shouldApply = (prevOwner != null && Config.ApplyOnPreviousOwner) ||
-								 (prevOwner == null && Config.ApplyOnNoPreviousOwner);
-
-				if (!shouldApply)
-					continue;
-
-				var playerWeapons = GetOrCreateDictionary(SavedWeapons, player);
-				playerWeapons[ccsWeaponBase.DesignerName] = new Tuple<int, int, int, int>(
-					ccsWeaponBase.Clip1,
-					ccsWeaponBase.Clip2,
-					ccsWeaponBase.ReserveAmmo[0],
-					ccsWeaponBase.ReserveAmmo[1]
-				);
-
-				Server.NextFrame(() =>
+				List<CHandle<CBasePlayerWeapon>> weaponList = [.. player.PlayerPawn.Value.WeaponServices.MyWeapons];
+				foreach (CHandle<CBasePlayerWeapon> weapon in weaponList)
 				{
-					if (!ccsWeaponBase.IsValid)
-						return;
+					if (!weapon.IsValid || weapon.Value == null)
+						continue;
 
-					var recentWeapons = GetOrCreateDictionary(RecentlyGivenWeapons, player);
-					if (recentWeapons.TryGetValue(weapon.Index, out var givenTime) &&
-						DateTime.Now - givenTime < TimeSpan.FromSeconds(0.5))
-						return;
+					CCSWeaponBase ccsWeaponBase = weapon.Value.As<CCSWeaponBase>();
+					if (ccsWeaponBase == null || !ccsWeaponBase.IsValid)
+						continue;
+
+					if (ccsWeaponBase.AttributeManager.Item.ItemDefinitionIndex != @event.Defindex)
+						continue;
+
+					var prevOwner = ccsWeaponBase.PrevOwner.Value?.OriginalController?.Value;
+					if (prevOwner == player)
+						continue;
+
+					bool shouldApply = (prevOwner != null && Config.ApplyOnPreviousOwner) || (prevOwner == null && Config.ApplyOnNoPreviousOwner);
+					if (!shouldApply)
+						continue;
 
 					string weaponName = ccsWeaponBase.DesignerName;
-					ccsWeaponBase.AddEntityIOEvent("Kill", ccsWeaponBase, null, "", 0f);
-					Logger.LogInformation($"Player {player.PlayerName} is retrying to give {weaponName}.");
-					player.GiveNamedItem(weaponName);
-				});
-			}
 
-			return HookResult.Continue;
-		}
+					var playerWeapons = GetOrCreateDictionary(SavedWeapons, player);
+					playerWeapons[weaponName] = new Tuple<int, int, int, int>(ccsWeaponBase.Clip1, ccsWeaponBase.Clip2, ccsWeaponBase.ReserveAmmo[0], ccsWeaponBase.ReserveAmmo[1]);
 
-		private HookResult OverrideHook(DynamicHook h)
-		{
-			var itemServices = h.GetParam<CCSPlayer_ItemServices>(0);
-			var player = GetPlayerFromItemServices(itemServices);
-
-			if (player is null || !player.IsValid)
-				return HookResult.Continue;
-
-			if (!TryTeam.TryGetValue(player, out var tryTeam) || !tryTeam.TryDequeue(out var entry))
-				return HookResult.Continue;
-
-			h.SetReturn((int)entry.team);
-			return HookResult.Handled;
-		}
-
-		private HookResult OverrideGiveNamedItemPost(DynamicHook h)
-		{
-			string weapon = h.GetParam<string>(1);
-			if (string.IsNullOrEmpty(weapon) || !weapon.Contains("weapon") || IgnoredItems.Contains(weapon))
-				return HookResult.Continue;
-
-			CCSPlayerController? player = GetPlayerFromItemServices(h.GetParam<CCSPlayer_ItemServices>(0));
-			CBasePlayerWeapon item = h.GetReturn<CBasePlayerWeapon>();
-			if (player == null || !player.IsValid || !item.IsValid)
-				return HookResult.Continue;
-
-			Logger.LogInformation($"Player {player.PlayerName} received {weapon} - ID: {item.AttributeManager.Item.ItemDefinitionIndex}, SerialNum: {item.Index}");
-
-			var playerWeapons = GetOrCreateDictionary(RecentlyGivenWeapons, player);
-			playerWeapons[item.Index] = DateTime.Now;
-
-			CUtlVector<CEconItemAttribute> attributes = item.AttributeManager.Item.NetworkedDynamicAttributes.Attributes.As<CUtlVector<CEconItemAttribute>>();
-			bool skinFound = attributes.Count > 0;
-
-			if (!skinFound)
-			{
-				var weaponRetries = GetOrCreateDictionary(RetryCounter, player);
-				int retryCount = weaponRetries.TryGetValue(weapon, out int count) ? count : 0;
-
-				if (retryCount >= MAX_RETRY_COUNT)
-				{
-					weaponRetries.Remove(weapon);
-					TryApplySavedAmmo(player, item);
-					return HookResult.Continue;
-				}
-
-				weaponRetries[weapon] = retryCount + 1;
-
-				var retries = GetOrCreateDictionary(PreviousRetries, player);
-				if (retries.TryGetValue(weapon, out var lastRetry) &&
-					DateTime.Now - lastRetry < TimeSpan.FromSeconds(RETRY_BLOCK_DELAY))
-				{
-					CleanupOldBlocks(player);
-					TryApplySavedAmmo(player, item);
-					return HookResult.Continue;
-				}
-
-				item.AddEntityIOEvent("Kill", item, null, "", 0f);
-
-				var tryTeam = GetOrCreateQueue(TryTeam, player);
-				retries[weapon] = DateTime.Now;
-
-				CsTeam nextTeam = player.Team == CsTeam.CounterTerrorist ? CsTeam.Terrorist : CsTeam.CounterTerrorist;
-				tryTeam.Enqueue((item.AttributeManager.Item.ItemDefinitionIndex, nextTeam));
-
-				AddTimer(0.1f, () =>
-				{
-					if (player.IsValid)
+					Server.NextFrame(() =>
 					{
-						Logger.LogInformation($"Player {player.PlayerName} is retrying to give {weapon}.");
-						player.GiveNamedItem(weapon);
-					}
-				});
-			}
-			else
-			{
-				if (RetryCounter.TryGetValue(player, out var weaponRetries))
-				{
-					weaponRetries.Remove(weapon);
-				}
+						if (!player.IsValid)
+							return;
 
-				TryApplySavedAmmo(player, item);
+						weapon.Value?.AddEntityIOEvent("Kill", weapon.Value, null, "", 0.0f);
+						player.GiveNamedItem(weaponName);
+
+						Server.NextFrame(() =>
+						{
+							if (player.IsValid)
+							{
+								RestoreWeaponAmmo(player, weaponName);
+							}
+						});
+					});
+
+					break;
+				}
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Error in OnItemPickup: {ex.Message}");
 			}
 
 			return HookResult.Continue;
 		}
 
-		public override void Unload(bool hotReload)
+		private void RestoreWeaponAmmo(CCSPlayerController player, string weaponName)
 		{
-			GetTeamNumber.Unhook(OverrideHook, HookMode.Pre);
-			VirtualFunctions.GiveNamedItemFunc.Unhook(OverrideGiveNamedItemPost, HookMode.Post);
+			try
+			{
+				if (!player.IsValid || player.PlayerPawn.Value?.WeaponServices == null)
+					return;
+
+				var savedWeapons = GetOrCreateDictionary(SavedWeapons, player);
+				if (!savedWeapons.TryGetValue(weaponName, out var ammoData))
+					return;
+
+				List<CHandle<CBasePlayerWeapon>> weaponList = [.. player.PlayerPawn.Value.WeaponServices.MyWeapons];
+				foreach (CHandle<CBasePlayerWeapon> weapon in weaponList)
+				{
+					if (!weapon.IsValid || weapon.Value == null)
+						continue;
+
+					CCSWeaponBase ccsWeaponBase = weapon.Value.As<CCSWeaponBase>();
+					if (ccsWeaponBase == null || !ccsWeaponBase.IsValid || ccsWeaponBase.DesignerName != weaponName)
+						continue;
+
+					ccsWeaponBase.Clip1 = ammoData.Item1;
+					ccsWeaponBase.Clip2 = ammoData.Item2;
+					ccsWeaponBase.ReserveAmmo[0] = ammoData.Item3;
+					ccsWeaponBase.ReserveAmmo[1] = ammoData.Item4;
+					break;
+				}
+
+				savedWeapons.Remove(weaponName);
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Error restoring weapon ammo: {ex.Message}");
+			}
+		}
+
+		private static Dictionary<TKey, TValue> GetOrCreateDictionary<TKey, TValue>(Dictionary<CCSPlayerController, Dictionary<TKey, TValue>> dict, CCSPlayerController player) where TKey : notnull
+		{
+			if (!dict.TryGetValue(player, out var innerDict))
+			{
+				innerDict = [];
+				dict[player] = innerDict;
+			}
+
+			return innerDict;
 		}
 
 		private static CCSPlayerController? GetPlayerFromItemServices(CCSPlayer_ItemServices itemServices)
 		{
-			if (itemServices?.Pawn?.Value is not CBasePlayerPawn pawn || !pawn.IsValid ||
-				pawn.Controller == null || !pawn.Controller.IsValid || pawn.Controller.Value == null)
+			if (itemServices?.Pawn?.Value is not CBasePlayerPawn pawn || !pawn.IsValid || pawn.Controller == null || !pawn.Controller.IsValid || pawn.Controller.Value == null)
 				return null;
 
 			var player = new CCSPlayerController(pawn.Controller.Value.Handle);
-			return player.IsValid && !player.IsBot && !player.IsHLTV &&
-				   player.Connected == PlayerConnectedState.PlayerConnected ? player : null;
+			return player.IsValid && !player.IsBot && !player.IsHLTV && player.Connected == PlayerConnectedState.PlayerConnected ? player : null;
 		}
 
-		private void CleanupOldBlocks()
+		public override void Unload(bool hotReload)
 		{
-			foreach (var p in PreviousRetries.Keys.ToList())
-				CleanupDictionary(p, PreviousRetries, RETRY_BLOCK_DELAY);
-
-			foreach (var p in PickupCooldowns.Keys.ToList())
-				CleanupDictionary(p, PickupCooldowns, PICKUP_COOLDOWN);
-
-			foreach (var p in RecentlyGivenWeapons.Keys.ToList())
-				CleanupDictionary(p, RecentlyGivenWeapons, 1.0);
-
-			RetryCounter.Clear();
+			VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPre, HookMode.Pre);
+			VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post);
+			DeregisterEventHandler<EventItemPickup>(OnItemPickup);
 		}
 
-		private void CleanupOldBlocks(CCSPlayerController player)
+		private unsafe bool HasPlayerSkinForWeapon(CCSPlayerController player, string weaponName, CsTeam team)
 		{
-			CleanupDictionary(player, PreviousRetries, RETRY_BLOCK_DELAY);
-			CleanupDictionary(player, PickupCooldowns, PICKUP_COOLDOWN);
-			CleanupDictionary(player, RecentlyGivenWeapons, 1.0);
-
-			RetryCounter.Remove(player);
-		}
-
-		private static void CleanupDictionary<TKey>(CCSPlayerController player, Dictionary<CCSPlayerController, Dictionary<TKey, DateTime>> dict, double timeoutSeconds)
-			where TKey : notnull
-		{
-			if (dict.TryGetValue(player, out var entries))
+			try
 			{
-				dict[player] = entries
-					.Where(x => DateTime.Now - x.Value < TimeSpan.FromSeconds(timeoutSeconds))
-					.ToDictionary(x => x.Key, x => x.Value);
+				if (FindMatchingWeaponsForTeamLoadout != null && player.PlayerPawn.Value != null)
+				{
+					CsTeam originalTeam = player.Team;
+					bool teamChanged = false;
+
+					try
+					{
+						if (originalTeam != team)
+						{
+							SetPlayerTeam(player, team);
+							teamChanged = true;
+						}
+
+						nint vectorPtr = CUtlVector<CEconItemView>.CreateVector(16);
+
+						try
+						{
+							FindMatchingWeaponsForTeamLoadout.Invoke(player.PlayerPawn.Value.Handle, weaponName, (int)team, false, vectorPtr);
+
+							int count = CUtlVector<CEconItemView>.GetVectorCount(vectorPtr);
+
+							bool hasValidSkin = false;
+							if (count > 0)
+							{
+								nint firstElement = CUtlVector<CEconItemView>.GetVectorElement(vectorPtr, 0);
+
+								if (firstElement != IntPtr.Zero)
+								{
+									try
+									{
+										var econItem = new CEconItemView(firstElement);
+
+										ulong itemId = econItem.ItemID;
+										hasValidSkin = itemId > 0;
+									}
+									catch (Exception ex)
+									{
+										hasValidSkin = false;
+										Logger.LogError($"Error processing CEconItemView: {ex.Message}");
+									}
+								}
+
+								return hasValidSkin;
+							}
+						}
+						finally
+						{
+							CUtlVector<CEconItemView>.FreeVector(vectorPtr);
+						}
+					}
+					finally
+					{
+						if (teamChanged)
+						{
+							SetPlayerTeam(player, originalTeam);
+						}
+					}
+				}
+
+				return false;
+			}
+			catch (Exception ex)
+			{
+				Logger.LogError($"Error checking skins for weapon: {ex.Message}");
+				return false;
 			}
 		}
 
-		private void TryApplySavedAmmo(CCSPlayerController player, CBasePlayerWeapon weapon)
-		{
-			if (SavedWeapons.TryGetValue(player, out var playerWeapons) &&
-				playerWeapons.TryGetValue(weapon.DesignerName, out var ammo))
-			{
-				weapon.Clip1 = ammo.Item1;
-				weapon.Clip2 = ammo.Item2;
-				weapon.ReserveAmmo[0] = ammo.Item3;
-				weapon.ReserveAmmo[1] = ammo.Item4;
+		private static bool IsWeaponKnife(string classname)
+			=> classname.Contains("knife") || classname.Contains("bayonet");
 
-				playerWeapons.Remove(weapon.DesignerName);
-			}
-		}
-
-		private static Dictionary<TKey, TValue> GetOrCreateDictionary<TKey, TValue>(
-			Dictionary<CCSPlayerController, Dictionary<TKey, TValue>> dict,
-			CCSPlayerController player)
-			where TKey : notnull
+		private static void SetPlayerTeam(CCSPlayerController player, CsTeam team)
 		{
-			if (!dict.TryGetValue(player, out var result))
-			{
-				result = [];
-				dict[player] = result;
-			}
-			return result;
-		}
+			if (player == null || !player.IsValid || player.PlayerPawn.Value == null)
+				return;
 
-		private static Queue<TValue> GetOrCreateQueue<TValue>(
-			Dictionary<CCSPlayerController, Queue<TValue>> dict,
-			CCSPlayerController player)
-		{
-			if (!dict.TryGetValue(player, out var result))
+			player.TeamNum = (byte)team;
+
+			if (player.PlayerPawn.Value != null && player.PlayerPawn.Value.IsValid)
 			{
-				result = new Queue<TValue>();
-				dict[player] = result;
+				player.PlayerPawn.Value.TeamNum = (byte)team;
 			}
-			return result;
 		}
 	}
 }
