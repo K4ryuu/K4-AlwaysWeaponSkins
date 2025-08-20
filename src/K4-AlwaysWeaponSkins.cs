@@ -110,7 +110,7 @@ namespace K4AlwaysWeaponSkins
 			try
 			{
 				CCSPlayerController? player = GetPlayerFromItemServices(hook.GetParam<CCSPlayer_ItemServices>(0));
-				if (player == null || !player.IsValid)
+				if (player == null || !player.IsValid || player.IsBot)
 					return HookResult.Continue;
 
 				string classname = hook.GetParam<string>(1);
@@ -136,7 +136,7 @@ namespace K4AlwaysWeaponSkins
 					return HookResult.Continue;
 
 				CCSPlayerController? player = @event.Userid;
-				if (player == null || !player.IsValid || player.PlayerPawn.Value?.WeaponServices == null)
+				if (player == null || !player.IsValid || player.IsBot || player.PlayerPawn.Value?.WeaponServices == null)
 					return HookResult.Continue;
 
 				if (string.IsNullOrEmpty(@event.Item))
