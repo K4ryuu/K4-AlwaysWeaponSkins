@@ -31,7 +31,7 @@ namespace K4AlwaysWeaponSkins
 		public override string ModuleName => "CS2 Always Weapon Skins";
 		public override string ModuleAuthor => "K4ryuu @ KitsuneLab (Final)";
 		public override string ModuleDescription => "Apply inventory skins to opposing teams as well.";
-		public override string ModuleVersion => "2.0.0";
+		public override string ModuleVersion => "2.0.1";
 
 		public required PluginConfig Config { get; set; } = new PluginConfig();
 		public void OnConfigParsed(PluginConfig config)
@@ -91,7 +91,7 @@ namespace K4AlwaysWeaponSkins
 
 				SetPlayerTeam(player, oppositeTeam);
 
-				Server.NextFrame(() =>
+				Server.NextWorldUpdate(() =>
 				{
 					if (player != null && player.IsValid)
 						SetPlayerTeam(player, playerTeam);
@@ -158,6 +158,9 @@ namespace K4AlwaysWeaponSkins
 					if (ccsWeaponBase == null || !ccsWeaponBase.IsValid)
 						continue;
 
+					if (!IsWeaponApplicable(ccsWeaponBase))
+						continue;
+
 					if (ccsWeaponBase.AttributeManager.Item.ItemDefinitionIndex != @event.Defindex)
 						continue;
 
@@ -174,7 +177,7 @@ namespace K4AlwaysWeaponSkins
 					var playerWeapons = GetOrCreateDictionary(SavedWeapons, player);
 					playerWeapons[weaponName] = new Tuple<int, int, int, int>(ccsWeaponBase.Clip1, ccsWeaponBase.Clip2, ccsWeaponBase.ReserveAmmo[0], ccsWeaponBase.ReserveAmmo[1]);
 
-					Server.NextFrame(() =>
+					Server.NextWorldUpdate(() =>
 					{
 						if (!player.IsValid)
 							return;
@@ -182,7 +185,7 @@ namespace K4AlwaysWeaponSkins
 						weapon.Value?.AddEntityIOEvent("Kill", weapon.Value, null, "", 0.0f);
 						player.GiveNamedItem(weaponName);
 
-						Server.NextFrame(() =>
+						Server.NextWorldUpdate(() =>
 						{
 							if (player.IsValid)
 							{
@@ -339,6 +342,28 @@ namespace K4AlwaysWeaponSkins
 
 		private static bool IsWeaponKnife(string classname)
 			=> classname.Contains("knife") || classname.Contains("bayonet");
+
+		// ! This is a list of skinnable weapon types! When Valve add skins to other types, update this list.
+		private static readonly HashSet<CSWeaponType> ApplicableWeaponTypes =
+		[
+			CSWeaponType.WEAPONTYPE_KNIFE,
+			CSWeaponType.WEAPONTYPE_MACHINEGUN,
+			CSWeaponType.WEAPONTYPE_PISTOL,
+			CSWeaponType.WEAPONTYPE_RIFLE,
+			CSWeaponType.WEAPONTYPE_SNIPER_RIFLE,
+			CSWeaponType.WEAPONTYPE_SHOTGUN,
+			CSWeaponType.WEAPONTYPE_SUBMACHINEGUN,
+			CSWeaponType.WEAPONTYPE_TASER
+		];
+
+		private static bool IsWeaponApplicable(CCSWeaponBase weaponBase)
+		{
+			CCSWeaponBaseVData? vData = weaponBase.VData;
+			if (vData == null)
+				return false;
+
+			return ApplicableWeaponTypes.Contains(vData.WeaponType);
+		}
 
 		private static void SetPlayerTeam(CCSPlayerController player, CsTeam team)
 		{
