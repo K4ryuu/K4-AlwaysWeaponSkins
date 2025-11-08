@@ -1,3 +1,8 @@
+-- 2025.11.08 - v2.0.1
+
+- fix: Add weapon type filter to prevent blocking non-skinnable items (#6)
+- fix: Replace NextFrame with NextWorldUpdate for better timing stability
+
 -- 2025.03.22 - v1.1.5
 
 - fix: The plugin replaced some items such as M4A4 with M4A1-S
